@@ -238,7 +238,6 @@ ON LINUX CLIENT
 
 x. Copy the keytab files to the client. (Typically in /etc/security/keytabs)
 
-
 x. Verify the principals in each keytab
 
 Example ...
