@@ -1,0 +1,323 @@
+In this document ...
+
+-----
+TERMS
+-----
+
+Kafka server name (alson know as KAFKA_SERVER_FQDN) ->
+
+   confluent-platform-standalone.address.cx
+
+DNS Domain Name (DNS_DOMAIN) ->
+
+   address.cx
+
+   NOTE: All values of DNS_DOMAIN in commands should be lowercase (address.cx)
+
+AD Domain (also known in Kerberos as REALM) ->
+
+   ADDRESS.CX
+
+   NOTE: All values of REALM in commands should be uppercase (ADDRESS.CX)
+
+Kafka service name (sasl.kerberos.service.name=kafka_server) ->
+
+   kafka_server
+
+   NOTE: The default value of sasl.kerberos.service.name is "kafka" (sasl.kerberos.service.name=kafkA)
+
+
+-----------------------
+WINDOWS SERVER AD SETUP
+-----------------------
+
+Here is a link to generic Windows Server AD configuration ->
+
+   https://blogs.technet.microsoft.com/canitpro/2017/02/22/step-by-step-setting-up-active-directory-in-windows-server-2016/
+
+
+--------------------------------------------------
+KAFKA / WINDOWS SERVER AD KERBEROS SETUP - PHASE 1
+--------------------------------------------------
+
+x. Log onto Windows Server as a user with administrator permissions
+
+x. Select Start -> Control Panel -> Administrative Tools -> Active Directory Users and Computers
+
+x. On the "Active Directory Users and Computers" window, right click on Managed Service Accounts under the tree view of the local domain and select New -> User.
+
+x. On the popup "New User" window, input the following:
+
+   First name ->
+
+      kafka
+   
+   Last name ->
+
+      server
+
+   Full name ->
+
+      kafka server
+
+   User logon name ->
+
+      kafka_server
+
+      NOTE: Using a logon name with special characters or spaces has not been tested
+
+x. Click Next and input password
+
+   Uncheck ->
+
+      "User must change password at next login"
+
+   Check ->
+
+      "User cannot change password"
+   
+   Check ->
+
+      "Password never expires"
+
+   Uncheck ->
+
+      "Account is disabled"
+
+x. Set the use account to use modern encyption
+
+Check ->
+
+   "The account supports Kerberos AES 256 bit encryption"
+
+   NOTE: This is required to use AES256-CTS-HMAC-SHA1-96
+
+Check ->
+
+   "The account supports Kerberos AES 128 bit encryption"
+
+   NOTE: This is required to use AES128-CTS-HMAC-SHA1-96
+
+----------
+CHECKPOINT
+----------
+
+Using an LDAP browsing tool, you should see the account with...
+
+   cn: kafka server
+
+   distinguishedName: CN=kafka server,CN=Managed Service Accounts,DC=address,DC=cx
+
+      NOTE: If your have OUs, you they will show in the distingushedName
+
+   sAMAccountName: kafka_server
+
+   userPrincipalName: kafka_server@address.cx
+
+--------------------------------------------------
+KAFKA / WINDOWS SERVER AD KERBEROS SETUP - PHASE 2
+--------------------------------------------------
+
+x. Add a Service Principal Name (SPN) for the account that was just created
+
+a) Launch a command window
+
+b) mkdir C:\Temp
+
+c) cd C:\Temp
+
+d) Use set spn to add an SPN to the user account.
+
+Command ...
+
+   setspn -S LOGIN_NAME/KAFKA_SERVER_FQDN LOGIN_NAME
+
+Example ...
+
+   setspn -S kafka_server/confluent-platform-standalone.address.cx kafka_server
+
+x. Generate keytab A with the ktpass command
+
+Command ...
+
+   ktpass -SetUPN -princ LOGIN_NAME@REALM -pass PASSWORD -mapuser LOGIN_NAME@DNS_DOMAIN -crypto ALL -ptype KRB5_NT_PRINCIPAL -out LOGIN_NAME.keytab.A -kvno 0 
+
+   NOTE: Use of "-crypto ALL" is discouraged due to the weak algorithm that will be included in the keytab file. This may be required for older Windows Server environments.
+
+Example ...
+
+   ktpass -SetUPN -princ kafka_server@ADDRESS -pass Passw0rd -mapuser kafka_server@address.cx -crypto ALL -ptype KRB5_NT_PRINCIPAL -out kafka_server.keytab.A -kvno 0 
+
+Sample Output ...
+
+   C:\Temp>ktpass -SetUPN -princ kafka_server@ADDRESS.CX -pass Passw0rd -mapuser kafka_server@address.cx -crypto ALL -ptype KRB5_NT_PRINCIPAL -out kafka_server.keytab.A -kvno 0
+   Targeting domain controller: windows2019.address.cx
+   Using legacy password setting method
+   Failed to set property 'servicePrincipalName' to 'kafka_server' on Dn 'CN=kafka server,CN=Managed Service Accounts,DC=address,DC=cx': 0x13.
+   WARNING: Unable to set SPN mapping data.
+   If kafka_server already has an SPN mapping installed for kafka_server, this is no cause for concern.
+   Key created.
+   Key created.
+   Key created.
+   Key created.
+   Key created.
+   Output keytab to kafka_server.keytab.A:
+   Keytab version: 0x502
+   keysize 49 kafka_server@ADDRESS.CX ptype 1 (KRB5_NT_PRINCIPAL) vno 0 etype 0x1 (DES-CBC-CRC) keylength 8 (0x51686eea3d9257c7)
+   keysize 49 kafka_server@ADDRESS.CX ptype 1 (KRB5_NT_PRINCIPAL) vno 0 etype 0x3 (DES-CBC-MD5) keylength 8 (0x51686eea3d9257c7)
+   keysize 57 kafka_server@ADDRESS.CX ptype 1 (KRB5_NT_PRINCIPAL) vno 0 etype 0x17 (RC4-HMAC) keylength 16 (0xa87f3a337d73085c45f9416be5787d86)
+   keysize 73 kafka_server@ADDRESS.CX ptype 1 (KRB5_NT_PRINCIPAL) vno 0 etype 0x12 (AES256-SHA1) keylength 32 (0x34e832f66818ae51cdbaf478d34e398e79f53e024c2d80f7fd6531a15de215c6)
+   keysize 57 kafka_server@ADDRESS.CX ptype 1 (KRB5_NT_PRINCIPAL) vno 0 etype 0x11 (AES128-SHA1) keylength 16 (0x54bcf23550fab95a09cfc1262cc13887)
+
+   Note: The errors ...
+
+      Failed to set property 'servicePrincipalName' to 'kafka_server' on Dn 'CN=kafka server,CN=Managed Service Accounts,DC=address,DC=cx': 0x13.
+      WARNING: Unable to set SPN mapping data.)
+
+   ... are expected
+
+x. Generate keytab B with the ktpass command
+
+Command ...
+
+   ktpass -SetUPN -princ LOGIN_NAME/KAFKA_SERVER_FQDN@REALM -pass <keytab password> -mapuser LOGIN_NAME@DNS_DOMAIN -crypto ALL -ptype KRB5_NT_PRINCIPAL -out LOGIN_NAME.keytab.B -kvno 0 
+
+   NOTE: Use of "-crypto ALL" is discouraged due to the weak algorithm that will be included in the keytab file. This may be required for older Windows Server environments.
+
+Example ...
+
+   ktpass -SetUPN -princ kafka_server/confluent-platform-standalone.address.cx@ADDRESS.CX -pass Passw0rd -mapuser kafka_server@address.cx -crypto ALL -ptype KRB5_NT_PRINCIPAL -out kafka_server.keytab.B -kvno 0 
+
+Sample Output ...
+
+   C:\Temp>ktpass -SetUPN -princ kafka_server/confluent-platform-standalone.address.cx@ADDRESS.CX -pass Passw0rd -mapuser kafka_server@address.cx -crypto ALL -ptype KRB5_NT_PRINCIPAL -out kafka_server.keytab.B -kvno 0
+   Targeting domain controller: windows2019.address.cx
+   Using legacy password setting method
+   Successfully mapped kafka_server/confluent-platform-standalone.address.cx to kafka_server.
+   Key created.
+   Key created.
+   Key created.
+   Key created.
+   Key created.
+   Output keytab to kafka_server.keytab.B:
+   Keytab version: 0x502
+   keysize 91 kafka_server/confluent-platform-standalone.address.cx@ADDRESS.CX ptype 1 (KRB5_NT_PRINCIPAL) vno 0 etype 0x1 (DES-CBC-CRC) keylength 8 (0xb549a4644031468f)
+   keysize 91 kafka_server/confluent-platform-standalone.address.cx@ADDRESS.CX ptype 1 (KRB5_NT_PRINCIPAL) vno 0 etype 0x3 (DES-CBC-MD5) keylength 8 (0xb549a4644031468f)
+   keysize 99 kafka_server/confluent-platform-standalone.address.cx@ADDRESS.CX ptype 1 (KRB5_NT_PRINCIPAL) vno 0 etype 0x17 (RC4-HMAC) keylength 16 (0xa87f3a337d73085c45f9416be5787d86)
+   keysize 115 kafka_server/confluent-platform-standalone.address.cx@ADDRESS.CX ptype 1 (KRB5_NT_PRINCIPAL) vno 0 etype 0x12 (AES256-SHA1) keylength 32 (0xa516a1c13022e72316e4ef2ddf9529c495b2c8b53389348b762c8a10ea24926e)
+   keysize 99 kafka_server/confluent-platform-standalone.address.cx@ADDRESS.CX ptype 1 (KRB5_NT_PRINCIPAL) vno 0 etype 0x11 (AES128-SHA1) keylength 16 (0xeb419a5a88e9f14595884cd5499f5cdf)
+
+----------
+CHECKPOINT
+----------
+
+x. Using an LDAP browsing tool, you should see the account with...
+
+   cn: kafka server
+
+   distinguishedName: CN=kafka server,CN=Managed Service Accounts,DC=address,DC=cx
+
+      NOTE: If your have OUs, you they will show in the distingushedName
+
+   sAMAccountName: kafka_server
+
+   servicePrincipleName: kafka_server/confluent-platform-standalone.address.cx
+
+      NOTE: servicePrincipalName as been added as (LOGIN_NAME/KAFKA_SERVER_FQDN)
+
+   userPrincipalName: kafka_server@address.cx
+
+x. You should have 2 keytab files in C:\Temp
+
+   C:\Temp\kafka_server.keytab.A
+   C:\Temp\kafka_server.keytab.B
+
+---------------
+ON LINUX CLIENT
+---------------
+
+x. Copy the keytab files to the client. (Typically in /etc/security/keytabs)
+
+
+x. Verify the principals in each keytab
+
+Example ...
+
+   klist -k kafka_server.keytab.A
+
+Sample Output ...
+
+   Keytab name: FILE:kafka_server.keytab.A
+   KVNO Principal
+   ---- --------------------------------------------------------------------------
+      0 kafka_server@ADDRESS.CX
+      0 kafka_server@ADDRESS.CX
+      0 kafka_server@ADDRESS.CX
+      0 kafka_server@ADDRESS.CX
+      0 kafka_server@ADDRESS.CX
+
+Example ...
+
+   klist -k kafka_server.keytab.B
+
+Sample Output ...
+
+   Keytab name: FILE:kafka_server.keytab.B
+   KVNO Principal
+   ---- --------------------------------------------------------------------------
+      0 kafka_server/confluent-platform-standalone.address.cx@ADDRESS.CX
+      0 kafka_server/confluent-platform-standalone.address.cx@ADDRESS.CX
+      0 kafka_server/confluent-platform-standalone.address.cx@ADDRESS.CX
+      0 kafka_server/confluent-platform-standalone.address.cx@ADDRESS.CX
+      0 kafka_server/confluent-platform-standalone.address.cx@ADDRESS.CX
+
+x. Merge the keytabs using ktutil
+
+Example ...
+
+   ktutil
+
+Commands ...
+
+  ktutil: read_kt kafka_server.keytab.A
+  ktutil: read_kt kafka_server.keytab.B
+  ktutil: write_kt kafka_server.keytab
+  ktutil: quit
+
+
+----------
+CHECKPOINT
+----------
+
+x. Verify that the merged keytab (kafka_server.keytab) has principals for both LOGIN_NAME@REALM and LOGIN_NAME/KAFKA_SERVER_FQDN@REALM
+
+Exanple ...
+
+   ktlist kafka_server.keytab
+
+Sample Output ...
+
+   Keytab name: FILE:kafka_server.keytab
+   KVNO Principal
+   ---- --------------------------------------------------------------------------
+      0 kafka_server@ADDRESS.CX
+      0 kafka_server@ADDRESS.CX
+      0 kafka_server@ADDRESS.CX
+      0 kafka_server@ADDRESS.CX
+      0 kafka_server@ADDRESS.CX
+      0 kafka_server/confluent-platform-standalone.address.cx@ADDRESS.CX
+      0 kafka_server/confluent-platform-standalone.address.cx@ADDRESS.CX
+      0 kafka_server/confluent-platform-standalone.address.cx@ADDRESS.CX
+      0 kafka_server/confluent-platform-standalone.address.cx@ADDRESS.CX
+      0 kafka_server/confluent-platform-standalone.address.cx@ADDRESS.CX
+
+
+x. Verify that you can get a ticket for the prinicpal LOGIN_NAME@REALM
+
+Example ...
+
+   kinit -k -t kafka_server.keytab kafka_server@ADDRESS.CX
+
+Sample Output ...
+
+   (no output if successful)
